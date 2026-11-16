@@ -74,6 +74,3 @@ The plan settings live at the top of the `<script>` section in `index.html`:
 
 This is a generic training template, not personalised coaching or medical advice. If you have any health conditions or injuries, or you are new to running, speak to a doctor or qualified coach before starting a marathon programme. Adjust or skip sessions if something hurts.
 
-## Licence
-
-Add a licence of your choice (for example MIT) before sharing the repository publicly.
