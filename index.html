@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Marathon Plan Builder</title>
+<title>Marathon and Half Marathon Plan Builder</title>
 <style>
 :root{--bg:#edf0f2;--surface:#fff;--ink:#101820;--mute:#5d6874;--line:#d3d9de;
 --E:#5f86a8;--T:#d98200;--I:#c23b5b;--M:#7b5ea7;--L:#0a7c66;--R:#101820;--focus:#1d5fd1}
@@ -59,10 +59,11 @@ th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--line)}th{co
 </head>
 <body>
 <div class="wrap">
-<h1>Marathon Plan Builder</h1>
+<h1>Marathon &amp; Half Marathon Plan Builder</h1>
 <p class="lede">Pick your running level and race date. Get a week-by-week plan on a calendar, then download it as an .ics file for Apple, Google or Outlook calendars.</p>
 
 <form id="f">
+<label>Race<select id="dist"><option value="marathon">Marathon</option><option value="half">Half marathon</option></select></label>
 <label>Running level
 <select id="level">
 <option value="beginner">Beginner</option>
@@ -74,20 +75,20 @@ th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--line)}th{co
 <select id="runs"><option>3</option><option selected>4</option><option>5</option><option>6</option></select></label>
 <label>Preferred long run day
 <select id="longday"><option value="6">Sunday</option><option value="5">Saturday</option><option value="-1">Let the planner choose</option></select></label>
-<label>Marathon date<input type="date" id="race" required></label>
+<label>Race date<input type="date" id="race" required></label>
 <label>Units<select id="units"><option value="km">Kilometres</option><option value="mi">Miles</option></select></label>
 <fieldset class="sports">
 <legend>Pace guidance (optional)</legend>
 <div class="pgrid">
 <label>Base paces on
-<select id="basis"><option value="none">No paces, effort only</option><option value="race">A recent race result</option><option value="goal">My goal marathon time</option></select></label>
+<select id="basis"><option value="none">No paces, effort only</option><option value="race">A recent race result</option><option value="goal">My goal finish time</option></select></label>
 </div>
 <div class="pgrid" id="racefields" hidden>
 <label>Race distance<select id="rdist"><option value="5000">5K</option><option value="10000">10K</option><option value="21097.5">Half marathon</option><option value="42195">Marathon</option></select></label>
 <label>Race time<input id="rtime" placeholder="e.g. 25:30 or 1:55:00"></label>
 </div>
 <div class="pgrid" id="goalfields" hidden>
-<label>Goal marathon time<input id="gtime" placeholder="e.g. 4:15:00"></label>
+<label>Goal finish time<input id="gtime" placeholder="e.g. 4:15:00 or 1:55:00"></label>
 </div>
 <p class="hint">Paces are rough guidance from published formulas. They are not tailored to you, so treat them as a starting point.</p>
 </fieldset>
@@ -126,10 +127,17 @@ th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--line)}th{co
 // ---- Plan definition ------------------------------------------------------
 // Day index: 0 = Monday … 6 = Sunday. E easy, T tempo, I intervals, M medium-long, L long, X other sport
 const LEVELS = {
-  beginner:     {start:6,  peak:32, no:['T','I','M']},
-  novice:       {start:10, peak:32, no:['I']},
-  intermediate: {start:14, peak:34, no:[]},
-  expert:       {start:18, peak:35, no:[]}
+  beginner:     {no:['T','I','M']},
+  novice:       {no:['I']},
+  intermediate: {no:[]},
+  expert:       {no:[]}
+};
+// lv: [starting long run, peak long run] in km. taper: long run as a share of the peak, for the last weeks before race week.
+const RACES = {
+  marathon: {name:'Marathon', km:42.195, m:42195, max:24, min:8, taper:[.45,.65],
+    lv:{beginner:[6,32], novice:[10,32], intermediate:[14,34], expert:[18,35]}},
+  half:     {name:'Half marathon', km:21.0975, m:21097.5, max:16, min:6, taper:[.7],
+    lv:{beginner:[5,16], novice:[8,18], intermediate:[10,20], expert:[12,21]}}
 };
 const MIX = {1:['L'],2:['L','E'],3:['L','E','E'],4:['L','T','E','E'],5:['L','I','T','E','E'],6:['L','I','T','M','E','E']};
 const TYPES = {
@@ -143,7 +151,8 @@ const TYPES = {
   X:{name:'Other sport', color:'--X'}
 };
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-const MAX_WEEKS = 24, MIN_WEEKS = 8, DAY = 864e5;
+const DAY = 864e5;
+let RC = RACES.marathon;
 
 const addDays = (d,n) => new Date(d.getFullYear(), d.getMonth(), d.getDate()+n);
 const mondayOf = d => addDays(d, -((d.getDay()+6)%7));
@@ -161,7 +170,7 @@ function describe(t, km) {
     case 'M': return 'Medium-long run. Steady and relaxed, and stay below tempo effort.' + (p ? ` Rough pace: ${pace(p.eFast)} to ${pace(p.eSlow)}, nearer the quicker end.` : '');
     case 'L': return 'Long run. Keep it slow and even. Practise race-day fuelling: take carbohydrate every 40 to 45 minutes once you pass 75 minutes.' + (p ? ` Rough pace: ${pace(p.eFast)} to ${pace(p.eSlow)}. Start at the slow end.` : '');
     case 'S': return 'Shakeout run. Very easy, just to keep the legs loose.' + (p ? ` Rough pace: ${pace(p.eSlow)} or slower.` : '');
-    case 'R': return 'Race day! 42.2 km. Start slower than feels necessary and save your effort for the second half.' + (p ? ` Rough target pace: ${pace(p.mp)}, which is about ${hms(p.mpMin)} at the finish and ${hms(p.mpMin/2)} at halfway.` : '');
+    case 'R': return `Race day! ${RC.km.toFixed(1)} km. ` + (RC.m === 42195 ? 'Start slower than feels necessary and save your effort for the second half.' : 'Settle into a steady rhythm early and keep something back for the final few kilometres.') + (p ? ` Rough target pace: ${pace(p.mp)}, which is about ${hms(p.mpMin)} at the finish${RC.m === 42195 ? ` and ${hms(p.mpMin/2)} at halfway` : ''}.` : '');
     case 'X': return 'Your regular activity, built into the plan. If your legs feel heavy before a key run, ease off.';
   }
 }
@@ -203,18 +212,19 @@ function readPaces() {
     if (!(t > 0)) throw new Error('Enter your race time as h:mm:ss (or mm:ss for a 5K or 10K).');
     vdot = vdotOf(d, t);
     if (!(vdot >= 25 && vdot <= 85)) throw new Error('That race time looks unlikely. Check the distance and enter the time as h:mm:ss.');
-    const dan = timeFor(vdot, 42195), rie = t*Math.pow(42195/d, 1.06);
+    const dan = timeFor(vdot, RC.m), rie = t*Math.pow(RC.m/d, 1.06);
     lo = Math.min(dan, rie); hi = Math.max(dan, rie); mpMin = (dan+rie)/2;
     basis = `your ${$('rdist').selectedOptions[0].text} time of ${$('rtime').value.trim()}`;
-    if (d < 21000) basis += ' (a marathon forecast from a short race is often optimistic for a first marathon)';
+    if (RC.m === 42195 && d < 21000) basis += ' (a marathon forecast from a short race is often optimistic for a first marathon)';
   } else {
     const t = parseTime($('gtime').value, true);
-    if (!(t >= 120 && t <= 600)) throw new Error('Enter your goal marathon time as h:mm:ss, for example 4:15:00.');
-    vdot = vdotOf(42195, t); mpMin = t;
+    const lim = RC.m === 42195 ? [120,600] : [50,300];
+    if (!(t >= lim[0] && t <= lim[1])) throw new Error('Enter your goal finish time as h:mm:ss, for example ' + (RC.m === 42195 ? '4:15:00' : '1:55:00') + '.');
+    vdot = vdotOf(RC.m, t); mpMin = t;
     if (!(vdot >= 25 && vdot <= 85)) throw new Error('That goal time looks unlikely. Enter it as h:mm:ss.');
-    basis = `your goal marathon time of ${$('gtime').value.trim()}`;
+    basis = `your goal ${RC.name.toLowerCase()} time of ${$('gtime').value.trim()}`;
   }
-  return {vdot, mpMin, lo, hi, basis, mp:mpMin*60/42.195,
+  return {vdot, mpMin, lo, hi, basis, mp:mpMin*60/RC.km,
     eSlow:secPerKm(vdot*.60), eFast:secPerKm(vdot*.70), t:secPerKm(vdot*.88), i:secPerKm(vdot*.98)};
 }
 
@@ -222,11 +232,11 @@ function renderZones() {
   const p = paces, el = $('zones');
   if (!p) { el.innerHTML = ''; return; }
   const rows = [['Easy and long runs', `${pace(p.eFast)} to ${pace(p.eSlow)}`, 'Conversational. Slower is always fine.'],
-    ['Marathon pace', pace(p.mp), 'Race-day target'],
+    ['Race pace', pace(p.mp), 'Race-day target'],
     ['Tempo', pace(p.t), 'Comfortably hard'],
     ['Intervals', pace(p.i), 'Hard but controlled']];
   el.innerHTML = `<div class="zones"><h3>Your rough pace guide</h3>
-    <p>Estimated from ${html(p.basis)}. ${p.lo ? `Projected marathon: roughly ${hms(p.lo)} to ${hms(p.hi)}.` : `Training paces are set from that goal.`}</p>
+    <p>Estimated from ${html(p.basis)}. ${p.lo ? `Projected ${RC.name.toLowerCase()}: roughly ${hms(p.lo)} to ${hms(p.hi)}.` : `Training paces are set from that goal.`}</p>
     <table><thead><tr><th>Session</th><th>Pace</th><th>Feel</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</tbody></table>
     <p class="disc">Rough guidance only, not tailored to you. These paces come from published formulas (Daniels' VDOT and Riegel's endurance model) and ignore your training history, age, health, weather and terrain. Use them as a starting point, run easy days by feel, and adjust. See a doctor or qualified coach if you are unsure.</p></div>`;
 }
@@ -264,14 +274,14 @@ function assign(levelKey, lay, blocked) {
 }
 
 function buildPlan(levelKey, race, o) {
-  const L = LEVELS[levelKey];
+  const [s0, pk] = RC.lv[levelKey];
   const today = new Date(); const t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   if (race <= t0) throw new Error('Choose a race date in the future.');
   const raceMon = mondayOf(race);
   let start = (t0.getDay()===1) ? t0 : addDays(mondayOf(t0), 7);
   let N = Math.round((raceMon - start)/DAY/7) + 1;
-  if (N > MAX_WEEKS) { N = MAX_WEEKS; start = addDays(raceMon, -7*(N-1)); }
-  if (N < MIN_WEEKS) throw new Error(`That leaves ${Math.max(N,0)} full training week${N===1?'':'s'}. Pick a date at least ${MIN_WEEKS} weeks away.`);
+  if (N > RC.max) { N = RC.max; start = addDays(raceMon, -7*(N-1)); }
+  if (N < RC.min) throw new Error(`That leaves ${Math.max(N,0)} full training week${N===1?'':'s'}. Pick a date at least ${RC.min} weeks away.`);
 
   const blocked = new Set(o.sports.flatMap(s => s.days));
   const lay = layout(o.runs, blocked, o.longPref);
@@ -286,19 +296,19 @@ function buildPlan(levelKey, race, o) {
   for (let i = 0; i < N; i++) {
     const r = N-1-i, mon = addDays(start, 7*i);
     let Lk, phase;
+    const tp = RC.taper.length;
     if (r === 0) phase = 'Race week';
-    else if (r === 1) { Lk = L.peak*.45; phase = 'Taper'; }
-    else if (r === 2) { Lk = L.peak*.65; phase = 'Taper'; }
+    else if (r <= tp) { Lk = pk*RC.taper[r-1]; phase = 'Taper'; }
     else {
-      Lk = L.start + (L.peak-L.start)*Math.min(1, i/(N-4));
-      phase = r === 3 ? 'Peak' : 'Build';
-      if ((i+1)%4 === 0 && r > 3) { Lk *= .75; phase = 'Cutback'; }
+      Lk = s0 + (pk-s0)*Math.min(1, i/(N-2-tp));
+      phase = r === tp+1 ? 'Peak' : 'Build';
+      if ((i+1)%4 === 0 && r > tp+1) { Lk *= .75; phase = 'Cutback'; }
     }
     const wk = [];
     if (r === 0) {
       const dow = (race.getDay()+6)%7;
       for (let d = 0; d <= dow; d++) {
-        if (d === dow) wk.push({d, t:'R', km:42.2});
+        if (d === dow) wk.push({d, t:'R', km:RC.km});
         else if (d === dow-2 && !blocked.has(d)) wk.push({d, t:'S', km:3});
         else if (d === dow-4 && !blocked.has(d)) wk.push({d, t:'S', km:5});
       }
@@ -350,6 +360,7 @@ $('f').addEventListener('submit', e => {
   e.preventDefault(); $('msg').textContent = '';
   units = $('units').value;
   try {
+    RC = RACES[$('dist').value]; TYPES.R.name = RC.name + ' race day';
     paces = readPaces();
     plan = buildPlan($('level').value, parse($('race').value),
       {runs:+$('runs').value, longPref:+$('longday').value, sports:readSports()});
@@ -368,7 +379,7 @@ $('dl').onclick = downloadIcs;
 function render() {
   const total = plan.weeks.reduce((a,w)=>a+w.km,0);
   const level = $('level').selectedOptions[0].text;
-  $('title').textContent = `${plan.weeks.length}-week ${level.toLowerCase()} plan`;
+  $('title').textContent = `${plan.weeks.length}-week ${level.toLowerCase()} ${RC.name.toLowerCase()} plan`;
   $('sum').textContent = `${plan.start.toLocaleDateString('en-GB',{day:'numeric',month:'long'})} to ${plan.race.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})} · ${fmt(total)} of running in total`;
   $('note').innerHTML = plan.notes.map(n => `<p>${html(n)}</p>`).join('');
   const kinds = ['E','T','I','M','L','R'].concat(plan.sessions.some(s=>s.t==='X') ? ['X'] : []);
@@ -413,7 +424,7 @@ const ymd = d => iso(d).replace(/-/g,'');
 
 function downloadIcs() {
   const stamp = new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d+/,'');
-  const L = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Marathon Plan Builder//EN','CALSCALE:GREGORIAN','METHOD:PUBLISH','X-WR-CALNAME:Marathon training plan'];
+  const L = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Marathon Plan Builder//EN','CALSCALE:GREGORIAN','METHOD:PUBLISH','X-WR-CALNAME:'+RC.name+' training plan'];
   plan.sessions.forEach((s, n) => {
     const name = s.t==='X' ? `${s.name} (${dur(s.mins)})` : TYPES[s.t].name + (s.t==='R' ? '' : ' - '+fmt(s.km));
     L.push('BEGIN:VEVENT',
@@ -428,15 +439,18 @@ function downloadIcs() {
   L.push('END:VCALENDAR');
   const a = Object.assign(document.createElement('a'), {
     href: URL.createObjectURL(new Blob([L.join('\r\n')+'\r\n'], {type:'text/calendar'})),
-    download: `marathon-plan-${iso(plan.race)}.ics`
+    download: `${RC.name.toLowerCase().replace(/ /g,'-')}-plan-${iso(plan.race)}.ics`
   });
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
 }
 
 $('basis').onchange = () => { $('racefields').hidden = $('basis').value !== 'race'; $('goalfields').hidden = $('basis').value !== 'goal'; };
 
-// Default race date: 16 weeks from today, on a Sunday
-(() => { const d = addDays(new Date(), 7*16); $('race').value = iso(addDays(d, (7-d.getDay())%7)); $('race').min = iso(addDays(new Date(),1)); })();
+// Default race date: 16 weeks (marathon) or 12 weeks (half) from today, on a Sunday
+const defaultRace = () => { const d = addDays(new Date(), 7*($('dist').value === 'half' ? 12 : 16)); return iso(addDays(d, (7-d.getDay())%7)); };
+$('race').value = defaultRace(); $('race').min = iso(addDays(new Date(),1));
+$('race').oninput = () => { $('race').dataset.touched = '1'; };
+$('dist').onchange = () => { if (!$('race').dataset.touched) $('race').value = defaultRace(); };
 </script>
 </body>
 </html>
