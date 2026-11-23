@@ -55,6 +55,10 @@ th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--line)}th{co
 .zones h3{margin:0 0 4px;font-size:1.05rem}.zones p{margin:0 0 8px}
 .zones table{margin-top:8px;border:0}
 .disc{color:var(--mute);font-size:.8rem;max-width:80ch}
+[hidden]{display:none!important}
+:root{--P:#0b8bbf}
+.chk{display:flex;flex-direction:row;align-items:center;gap:8px;color:var(--ink);font-size:1rem}
+.chk input{width:18px;height:18px;padding:0;margin:0}
 </style>
 </head>
 <body>
@@ -91,6 +95,16 @@ th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--line)}th{co
 <label>Goal finish time<input id="gtime" placeholder="e.g. 4:15:00 or 1:55:00"></label>
 </div>
 <p class="hint">Paces are rough guidance from published formulas. They are not tailored to you, so treat them as a starting point.</p>
+</fieldset>
+<fieldset class="sports">
+<legend>Parkrun (optional)</legend>
+<label class="chk"><input type="checkbox" id="pr"> I do parkrun on Saturday mornings</label>
+<div class="pgrid" id="prfields" hidden>
+<label class="chk"><input type="checkbox" id="prtf"> I run to and from parkrun</label>
+<label id="prdistwrap" hidden>Distance each way (<span class="u">km</span>)<input type="number" id="prdist" min="0.5" max="10" step="0.5" value="2"></label>
+</div>
+<p class="hint" id="prtotal" hidden></p>
+<p class="hint">Parkrun counts as one of your runs each week. The planner builds your other runs around it and keeps it easy in most weeks.</p>
 </fieldset>
 <fieldset class="sports">
 <legend>Other sports or activities (optional)</legend>
@@ -148,7 +162,8 @@ const TYPES = {
   L:{name:'Long run', frac:1, min:6, color:'--L'},
   R:{name:'Marathon race day', color:'--R'},
   S:{name:'Shakeout run', color:'--E'},
-  X:{name:'Other sport', color:'--X'}
+  X:{name:'Other sport', color:'--X'},
+  P:{name:'Parkrun', color:'--P'}
 };
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 const DAY = 864e5;
@@ -160,7 +175,7 @@ const iso = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+
 const parse = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y,m-1,d); };
 const dur = m => m < 60 ? m+' min' : (m/60).toFixed(1).replace('.0','')+' h';
 
-function describe(t, km) {
+function describe(t, km, s) {
   const p = paces;
   switch (t) {
     case 'E': return 'Easy run at a conversational pace. You should be able to speak in full sentences.' + (p ? ` Rough pace: ${pace(p.eFast)} to ${pace(p.eSlow)}, or slower. If you cannot chat, slow down.` : '');
@@ -171,6 +186,12 @@ function describe(t, km) {
     case 'L': return 'Long run. Keep it slow and even. Practise race-day fuelling: take carbohydrate every 40 to 45 minutes once you pass 75 minutes.' + (p ? ` Rough pace: ${pace(p.eFast)} to ${pace(p.eSlow)}. Start at the slow end.` : '');
     case 'S': return 'Shakeout run. Very easy, just to keep the legs loose.' + (p ? ` Rough pace: ${pace(p.eSlow)} or slower.` : '');
     case 'R': return `Race day! ${RC.km.toFixed(1)} km. ` + (RC.m === 42195 ? 'Start slower than feels necessary and save your effort for the second half.' : 'Settle into a steady rhythm early and keep something back for the final few kilometres.') + (p ? ` Rough target pace: ${pace(p.mp)}, which is about ${hms(p.mpMin)} at the finish${RC.m === 42195 ? ` and ${hms(p.mpMin/2)} at halfway` : ''}.` : '');
+    case 'P': { const e = s && s.each > 0, free = s && s.eff === 'free';
+      return `Parkrun: 5 km at the park${e ? `, with a ${fmt(s.each)} warm-up run there and a ${fmt(s.each)} cool-down run back (${fmt(km)} in total)` : ''}. ` +
+        (free ? 'This is a lighter week, so you can run it harder if you feel good, but keep it no harder than comfortably hard.'
+              : `Treat it as a training run, not a race: run it easy to steady${s && s.ld === 6 ? ' so you are fresh for tomorrow’s long run' : ''}.`) +
+        (e ? ' Keep the runs there and back easy.' : '') +
+        (p ? (free ? ` Rough pace: up to about ${pace(p.t)}.` : ` Rough pace: ${pace(p.eFast)} to ${pace(p.eSlow)}.`) : ''); }
     case 'X': return 'Your regular activity, built into the plan. If your legs feel heavy before a key run, ease off.';
   }
 }
@@ -245,7 +266,7 @@ function renderZones() {
 const combos = (a,k) => k===0 ? [[]] : a.length<k ? [] : [...combos(a.slice(1),k-1).map(c=>[a[0],...c]), ...combos(a.slice(1),k)];
 const cd = (a,b) => { const x = Math.abs(a-b); return Math.min(x, 7-x); };
 
-function layout(k, blocked, longPref) {
+function layout(k, blocked, longPref, prk) {
   const avail = [0,1,2,3,4,5,6].filter(d => !blocked.has(d));
   let best = null;
   for (const set of combos(avail, Math.min(k, avail.length))) for (const ld of set) {
@@ -253,18 +274,21 @@ function layout(k, blocked, longPref) {
     for (let i = 0; i < set.length; i++) for (let j = i+1; j < set.length; j++) if (cd(set[i],set[j]) === 1) sc -= 10;
     sc += ld === longPref ? 5 : ld >= 5 ? 2 : 0;
     if ([...blocked].some(b => cd(b,ld) === 1)) sc -= 1;
+    if (prk && set.includes(4)) sc -= 4;   // avoid a run the day before parkrun
     if (!best || sc > best.sc) best = {sc, set, ld};
   }
   return best || {set:[], ld:-1};
 }
 
-function assign(levelKey, lay, blocked) {
-  const types = MIX[lay.set.length].map(t => LEVELS[levelKey].no.includes(t) ? 'E' : t);
+function assign(levelKey, lay, blocked, prk) {
+  let types = MIX[lay.set.length + (prk ? 1 : 0)];
+  if (prk) { const e = types.lastIndexOf('E'); types = types.filter((_, i) => i !== e); }   // parkrun takes one easy-run slot
+  types = types.map(t => LEVELS[levelKey].no.includes(t) ? 'E' : t);
   const map = {[lay.ld]:'L'};
   let free = lay.set.filter(d => d !== lay.ld);
   const rest = types.slice(1);
   for (const t of rest.filter(t => t !== 'E')) {
-    const placed = Object.keys(map).map(Number);
+    const placed = Object.keys(map).map(Number).concat(prk ? [5] : []);
     const score = d => Math.min(...placed.map(p => cd(p,d))) - ([...blocked].some(b => cd(b,d)===1) ? .5 : 0);
     const d = free.reduce((a,b) => score(b) > score(a) ? b : a);
     map[d] = t; free = free.filter(x => x !== d);
@@ -283,14 +307,19 @@ function buildPlan(levelKey, race, o) {
   if (N > RC.max) { N = RC.max; start = addDays(raceMon, -7*(N-1)); }
   if (N < RC.min) throw new Error(`That leaves ${Math.max(N,0)} full training week${N===1?'':'s'}. Pick a date at least ${RC.min} weeks away.`);
 
+  const prk = o.parkrun;
   const blocked = new Set(o.sports.flatMap(s => s.days));
-  const lay = layout(o.runs, blocked, o.longPref);
+  if (prk) blocked.add(5);
+  const lay = layout(o.runs - (prk ? 1 : 0), blocked, o.longPref, !!prk);
   if (!lay.set.length) throw new Error('Your other activities fill every day of the week. Free up at least one day for running.');
   const notes = [];
-  if (lay.set.length < o.runs) notes.push(`Your other sports leave ${lay.set.length} free day${lay.set.length===1?'':'s'}, so the plan has ${lay.set.length} run${lay.set.length===1?'':'s'} a week.`);
+  const tot = lay.set.length + (prk ? 1 : 0);
+  if (tot < o.runs) notes.push(`Your other commitments leave ${tot} free day${tot===1?'':'s'} for running, so the plan has ${tot} run${tot===1?'':'s'} a week.`);
+  if (prk) notes.push(`Parkrun is one of your ${o.runs} runs each week${prk.each > 0 ? `, with a ${fmt(prk.each)} run each way` : ''}. It is dropped from the final three days before your race.`);
+  if (prk && o.sports.some(s => s.days.includes(5))) notes.push('You have another activity on Saturday as well as parkrun. Both appear in the calendar, so check that is realistic.');
   if (o.longPref >= 0 && lay.ld !== o.longPref) notes.push(`Your long run is on ${DAYS[lay.ld]} because ${DAYS[o.longPref]} is taken.`);
   if (o.sports.length) notes.push('Other sports in the three days before the race are left out so you arrive fresh.');
-  const map = assign(levelKey, lay, blocked);
+  const map = assign(levelKey, lay, blocked, !!prk);
 
   const sessions = [], weeks = [];
   for (let i = 0; i < N; i++) {
@@ -320,6 +349,14 @@ function buildPlan(levelKey, race, o) {
     }
     let km = 0, mins = 0;
     for (const s of wk) { km += s.km; sessions.push({date:addDays(mon,s.d), t:s.t, km:s.km, week:i+1}); }
+    if (prk) {
+      const date = addDays(mon, 5);
+      if (date < addDays(race, -3)) {
+        const each = phase === 'Taper' ? prk.each/2 : prk.each, total = 5 + 2*each;
+        km += total;
+        sessions.push({date, t:'P', km:total, week:i+1, each, eff: phase === 'Cutback' ? 'free' : 'easy', ld: lay.ld});
+      }
+    }
     for (const sp of o.sports) for (const d of sp.days) {
       const date = addDays(mon, d);
       if (date < addDays(race, -3)) { mins += sp.mins; sessions.push({date, t:'X', km:0, week:i+1, name:sp.name, mins:sp.mins}); }
@@ -333,7 +370,7 @@ function buildPlan(levelKey, race, o) {
 const $ = id => document.getElementById(id);
 let plan = null, units = 'km', shown = null, selected = null;
 const fmt = km => units==='mi' ? (km*0.621371).toFixed(1).replace(/\.0$/,'')+' mi' : (Math.round(km*10)/10)+' km';
-const nameOf = s => s.t==='X' ? s.name : TYPES[s.t].name;
+const nameOf = s => s.t==='X' ? s.name : s.t==='P' && s.each > 0 ? 'Parkrun + runs there and back' : TYPES[s.t].name;
 const label = s => s.t==='X' ? `${s.name} · ${dur(s.mins)}` : nameOf(s) + (s.t==='R' ? '' : ' · '+fmt(s.km));
 const colorOf = t => `var(${TYPES[t].color})`;
 const esc = s => s.replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\n/g,'\\n');
@@ -356,6 +393,23 @@ const readSports = () => [...document.querySelectorAll('#rows .row')].map(r => (
   mins: Math.max(15, +r.querySelector('.sm').value || 60)
 })).filter(s => s.days.length);
 
+function readParkrun() {
+  if (!$('pr').checked) return null;
+  let each = 0;
+  if ($('prtf').checked) {
+    each = (+$('prdist').value || 0) * ($('units').value === 'mi' ? 1.609344 : 1);
+    if (each > 16.1) throw new Error('Keep the distance each way to 10 or less.');
+  }
+  return {each: Math.max(0, each)};
+}
+function prTotal() {
+  const mi = $('units').value === 'mi', unit = mi ? 'mi' : 'km', park = mi ? 5/1.609344 : 5;
+  const d = $('prtf').checked ? (+$('prdist').value || 0) : 0;
+  const f = x => (Math.round(x*10)/10)+' '+unit;
+  $('prtotal').textContent = d > 0 ? `Saturday total: ${f(2*d+park)} (${f(d)} there, ${f(park)} parkrun, ${f(d)} back).` : `Saturday total: ${f(park)}.`;
+  document.querySelectorAll('.u').forEach(e => e.textContent = unit);
+}
+
 $('f').addEventListener('submit', e => {
   e.preventDefault(); $('msg').textContent = '';
   units = $('units').value;
@@ -363,7 +417,7 @@ $('f').addEventListener('submit', e => {
     RC = RACES[$('dist').value]; TYPES.R.name = RC.name + ' race day';
     paces = readPaces();
     plan = buildPlan($('level').value, parse($('race').value),
-      {runs:+$('runs').value, longPref:+$('longday').value, sports:readSports()});
+      {runs:+$('runs').value, longPref:+$('longday').value, sports:readSports(), parkrun:readParkrun()});
   } catch (err) { $('msg').textContent = err.message; $('out').hidden = true; return; }
   shown = new Date(plan.start.getFullYear(), plan.start.getMonth(), 1);
   selected = null;
@@ -382,7 +436,7 @@ function render() {
   $('title').textContent = `${plan.weeks.length}-week ${level.toLowerCase()} ${RC.name.toLowerCase()} plan`;
   $('sum').textContent = `${plan.start.toLocaleDateString('en-GB',{day:'numeric',month:'long'})} to ${plan.race.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})} · ${fmt(total)} of running in total`;
   $('note').innerHTML = plan.notes.map(n => `<p>${html(n)}</p>`).join('');
-  const kinds = ['E','T','I','M','L','R'].concat(plan.sessions.some(s=>s.t==='X') ? ['X'] : []);
+  const kinds = ['E','T','I','M','L','R'].concat(plan.sessions.some(s=>s.t==='P') ? ['P'] : [], plan.sessions.some(s=>s.t==='X') ? ['X'] : []);
   $('legend').innerHTML = kinds.map(k=>`<span><i style="background:${colorOf(k)}"></i>${TYPES[k].name}</span>`).join('');
   const peak = Math.max(...plan.weeks.map(w=>w.km));
   $('weeks').innerHTML = plan.weeks.map(w=>`<tr><td>${w.n}</td><td>${w.mon.toLocaleDateString('en-GB',{day:'numeric',month:'short'})}</td><td>${w.phase}</td><td>${fmt(w.km)}</td><td>${w.mins?dur(w.mins):'–'}</td><td class="bartd"><div class="vol" style="width:${w.km/peak*100}%"></div></td></tr>`).join('');
@@ -412,7 +466,7 @@ function showDetail() {
   const ss = on(selected), dateStr = parse(selected).toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'});
   if (!ss.length) { el.innerHTML = `<h3>${dateStr}</h3><p>Rest day. Sleep well, stretch if you like, or take a gentle walk.</p>`; return; }
   el.style.borderLeftColor = colorOf(ss[0].t);
-  el.innerHTML = ss.map(s => `<h3>${dateStr}: ${html(label(s))}</h3><p>${describe(s.t, s.km)}</p>`).join('') + `<p class="n">Week ${ss[0].week} of ${plan.weeks.length}</p>`;
+  el.innerHTML = ss.map(s => `<h3>${dateStr}: ${html(label(s))}</h3><p>${describe(s.t, s.km, s)}</p>`).join('') + `<p class="n">Week ${ss[0].week} of ${plan.weeks.length}</p>`;
 }
 
 // ---- ICS export -----------------------------------------------------------
@@ -426,14 +480,14 @@ function downloadIcs() {
   const stamp = new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d+/,'');
   const L = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Marathon Plan Builder//EN','CALSCALE:GREGORIAN','METHOD:PUBLISH','X-WR-CALNAME:'+RC.name+' training plan'];
   plan.sessions.forEach((s, n) => {
-    const name = s.t==='X' ? `${s.name} (${dur(s.mins)})` : TYPES[s.t].name + (s.t==='R' ? '' : ' - '+fmt(s.km));
+    const name = s.t==='X' ? `${s.name} (${dur(s.mins)})` : nameOf(s) + (s.t==='R' ? '' : ' - '+fmt(s.km));
     L.push('BEGIN:VEVENT',
       `UID:${ymd(s.date)}-${s.t}-${n}@marathon-plan-builder`,
       `DTSTAMP:${stamp}`,
       `DTSTART;VALUE=DATE:${ymd(s.date)}`,
       `DTEND;VALUE=DATE:${ymd(addDays(s.date,1))}`,
       ...fold('SUMMARY:'+esc(name)),
-      ...fold('DESCRIPTION:'+esc(describe(s.t, s.km)+`\nWeek ${s.week} of ${plan.weeks.length}`+(paces?'\nPaces are rough guidance only and not tailored to you.':''))),
+      ...fold('DESCRIPTION:'+esc(describe(s.t, s.km, s)+`\nWeek ${s.week} of ${plan.weeks.length}`+(paces?'\nPaces are rough guidance only and not tailored to you.':''))),
       'TRANSP:TRANSPARENT','END:VEVENT');
   });
   L.push('END:VCALENDAR');
@@ -445,6 +499,12 @@ function downloadIcs() {
 }
 
 $('basis').onchange = () => { $('racefields').hidden = $('basis').value !== 'race'; $('goalfields').hidden = $('basis').value !== 'goal'; };
+
+$('pr').onchange = () => { $('prfields').hidden = !$('pr').checked; $('prtotal').hidden = !$('pr').checked; prTotal(); };
+$('prtf').onchange = () => { $('prdistwrap').hidden = !$('prtf').checked; prTotal(); };
+$('prdist').oninput = prTotal;
+$('units').addEventListener('change', prTotal);
+prTotal();
 
 // Default race date: 16 weeks (marathon) or 12 weeks (half) from today, on a Sunday
 const defaultRace = () => { const d = addDays(new Date(), 7*($('dist').value === 'half' ? 12 : 16)); return iso(addDays(d, (7-d.getDay())%7)); };
