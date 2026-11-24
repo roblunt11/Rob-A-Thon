@@ -101,7 +101,7 @@ th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--line)}th{co
 <label class="chk"><input type="checkbox" id="pr"> I do parkrun on Saturday mornings</label>
 <div class="pgrid" id="prfields" hidden>
 <label class="chk"><input type="checkbox" id="prtf"> I run to and from parkrun</label>
-<label id="prdistwrap" hidden>Distance each way (<span class="u">km</span>)<input type="number" id="prdist" min="0.5" max="10" step="0.5" value="2"></label>
+<label id="prdistwrap" hidden>Distance each way (<span class="u">km</span>)<input type="number" id="prdist" min="0.1" max="10" step="any" value="2"></label>
 </div>
 <p class="hint" id="prtotal" hidden></p>
 <p class="hint">Parkrun counts as one of your runs each week. The planner builds your other runs around it and keeps it easy in most weeks.</p>
@@ -380,7 +380,7 @@ function addRow(name='', days=[], mins=60) {
   const row = document.createElement('div'); row.className = 'row';
   row.innerHTML = `<input class="sn" placeholder="e.g. 5-a-side football" aria-label="Activity name" value="${html(name)}">
     <span class="dpl-wrap">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<label class="dpl"><input type="checkbox" value="${i}"${days.includes(i)?' checked':''}>${d}</label>`).join('')}</span>
-    <input class="sm" type="number" min="15" max="300" step="15" value="${mins}" aria-label="Minutes per session"> min
+    <input class="sm" type="number" min="15" max="300" step="1" value="${mins}" aria-label="Minutes per session"> min
     <button type="button" class="ghost rm">Remove</button>`;
   row.querySelector('.rm').onclick = () => row.remove();
   $('rows').appendChild(row);
